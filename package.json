@@ -1,0 +1,31 @@
+{
+  "name": "awesome-ai-guide",
+  "version": "0.0.1",
+  "description": "Nextra docs template",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepakkamboj/awesome-ai-guide.git"
+  },
+  "author": "Deepak Kamboj <deepakkamboj@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/deepakkamboj/awesome-ai-guide/issues"
+  },
+  "homepage": "https://github.com/deepakkamboj/awesome-ai-guide#readme",
+  "dependencies": {
+    "next": "^14.2.0",
+    "nextra": "^2.13.0",
+    "nextra-theme-docs": "^2.13.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "18.11.10",
+    "typescript": "^4.9.3"
+  }
+}

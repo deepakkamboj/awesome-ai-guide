@@ -1,0 +1,23 @@
+{
+  "index": "Introduction to RAG",
+  "fundamentals": {
+    "title": "Chapter 1: RAG Fundamentals",
+    "type": "page"
+  },
+  "architecture": {
+    "title": "Chapter 2: RAG Architecture",
+    "type": "page"
+  },
+  "implementation": {
+    "title": "Chapter 3: Implementation Guide",
+    "type": "page"
+  },
+  "advanced": {
+    "title": "Chapter 4: Advanced Techniques",
+    "type": "page"
+  },
+  "production": {
+    "title": "Chapter 5: Production Deployment",
+    "type": "page"
+  }
+}

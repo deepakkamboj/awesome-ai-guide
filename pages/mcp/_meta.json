@@ -1,0 +1,23 @@
+{
+  "index": "Introduction to MCP",
+  "overview": {
+    "title": "Chapter 1: MCP Overview",
+    "type": "page"
+  },
+  "protocol": {
+    "title": "Chapter 2: Protocol Design",
+    "type": "page"
+  },
+  "implementation": {
+    "title": "Chapter 3: Implementation Guide",
+    "type": "page"
+  },
+  "agents": {
+    "title": "Chapter 4: Agent Integration",
+    "type": "page"
+  },
+  "production": {
+    "title": "Chapter 5: Production Deployment",
+    "type": "page"
+  }
+}

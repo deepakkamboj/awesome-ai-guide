@@ -1,0 +1,14 @@
+.next
+node_modules
+
+# API Keys and sensitive files
+openai_api_key.txt
+*.key
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Jupyter Notebook outputs
+.ipynb_checkpoints/

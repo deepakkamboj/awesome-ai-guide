@@ -1,0 +1,23 @@
+{
+  "index": "Introduction to LLMs",
+  "fundamentals": {
+    "title": "Chapter 1: LLM Fundamentals",
+    "type": "page"
+  },
+  "architecture": {
+    "title": "Chapter 2: Model Architecture",
+    "type": "page"
+  },
+  "training": {
+    "title": "Chapter 3: Training & Fine-tuning",
+    "type": "page"
+  },
+  "deployment": {
+    "title": "Chapter 4: Deployment Strategies",
+    "type": "page"
+  },
+  "optimization": {
+    "title": "Chapter 5: Performance Optimization",
+    "type": "page"
+  }
+}
