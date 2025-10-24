@@ -1,24 +1,24 @@
 {
   "index": "Introduction",
   "llm": {
-    "title": "🧠 Module 1: LLM",
+    "title": "Module 1: LLM",
     "type": "page"
   },
 
   "rag": {
-    "title": "🔍 Module 2: RAG",
+    "title": "Module 2: RAG",
     "type": "page"
   },
   "ai-agents": {
-    "title": "📖 Module 3: AI Agents",
+    "title": "Module 3: AI Agents",
     "type": "page"
   },
   "mcp": {
-    "title": "🔗 Module 4: MCP",
+    "title": "Module 4: MCP",
     "type": "page"
   },
   "about": {
-    "title": "About",
+    "title": "About the author",
     "type": "page"
   }
 }

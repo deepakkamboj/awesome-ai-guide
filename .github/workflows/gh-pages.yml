@@ -49,7 +49,7 @@ jobs:
               cp -r ./.next ./out
             fi
           fi
-          
+
           echo "Final repository contents:"
           ls -la
 
