@@ -1,0 +1,1520 @@
+# Chapter 3: Implementation Guide
+
+## Building MCP Servers and Clients
+
+This chapter provides comprehensive guidance for implementing MCP servers and clients, from basic examples to production-ready systems. We'll cover best practices, common patterns, and real-world implementation strategies.
+
+## Project Setup and Dependencies
+
+### Setting Up the Development Environment
+
+```bash
+# Create a new MCP project
+mkdir awesome-mcp-server
+cd awesome-mcp-server
+
+# Initialize package.json
+npm init -y
+
+# Install MCP SDK and dependencies
+npm install @modelcontextprotocol/sdk
+npm install --save-dev typescript @types/node ts-node nodemon
+
+# Install additional utilities
+npm install zod ajv dotenv winston
+```
+
+### Project Structure
+
+```
+awesome-mcp-server/
+├── src/
+│   ├── server/
+│   │   ├── index.ts
+│   │   ├── handlers/
+│   │   │   ├── tools.ts
+│   │   │   ├── resources.ts
+│   │   │   └── prompts.ts
+│   │   ├── services/
+│   │   │   ├── database.ts
+│   │   │   ├── filesystem.ts
+│   │   │   └── external-api.ts
+│   │   └── utils/
+│   │       ├── validation.ts
+│   │       ├── permissions.ts
+│   │       └── logging.ts
+│   ├── client/
+│   │   ├── index.ts
+│   │   └── examples/
+│   └── types/
+│       └── index.ts
+├── config/
+│   ├── server.json
+│   └── permissions.json
+├── tests/
+├── package.json
+└── tsconfig.json
+```
+
+### TypeScript Configuration
+
+```json
+// tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "tests"]
+}
+```
+
+## Building a Comprehensive MCP Server
+
+### Core Server Implementation
+
+```typescript
+// src/server/index.ts
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
+import { ToolHandlers } from "./handlers/tools.js";
+import { ResourceHandlers } from "./handlers/resources.js";
+import { PromptHandlers } from "./handlers/prompts.js";
+import { Logger } from "./utils/logging.js";
+import { PermissionManager } from "./utils/permissions.js";
+import { ValidationManager } from "./utils/validation.js";
+
+export class AwesomeMCPServer {
+  private server: Server;
+  private logger: Logger;
+  private permissions: PermissionManager;
+  private validation: ValidationManager;
+  private toolHandlers: ToolHandlers;
+  private resourceHandlers: ResourceHandlers;
+  private promptHandlers: PromptHandlers;
+
+  constructor() {
+    this.logger = new Logger("AwesomeMCPServer");
+    this.permissions = new PermissionManager();
+    this.validation = new ValidationManager();
+
+    this.server = new Server(
+      {
+        name: "awesome-mcp-server",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {
+          tools: { listChanged: true },
+          resources: {
+            subscribe: true,
+            listChanged: true,
+          },
+          prompts: { listChanged: true },
+          logging: {},
+        },
+      }
+    );
+
+    this.toolHandlers = new ToolHandlers(this.logger, this.permissions);
+    this.resourceHandlers = new ResourceHandlers(this.logger, this.permissions);
+    this.promptHandlers = new PromptHandlers(this.logger);
+
+    this.setupHandlers();
+  }
+
+  private setupHandlers(): void {
+    // Tool handlers
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: await this.toolHandlers.listTools(),
+    }));
+
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const { name, arguments: args } = request.params;
+
+      // Validate permissions
+      if (!this.permissions.canExecuteTool(name)) {
+        throw new Error(`Permission denied for tool: ${name}`);
+      }
+
+      // Execute tool
+      return await this.toolHandlers.callTool(name, args || {});
+    });
+
+    // Resource handlers
+    this.server.setRequestHandler({ method: "resources/list" }, async () => ({
+      resources: await this.resourceHandlers.listResources(),
+    }));
+
+    this.server.setRequestHandler(
+      { method: "resources/read" },
+      async (request) => {
+        const { uri } = request.params as { uri: string };
+
+        if (!this.permissions.canAccessResource(uri)) {
+          throw new Error(`Permission denied for resource: ${uri}`);
+        }
+
+        return {
+          contents: await this.resourceHandlers.readResource(uri),
+        };
+      }
+    );
+
+    // Prompt handlers
+    this.server.setRequestHandler({ method: "prompts/list" }, async () => ({
+      prompts: await this.promptHandlers.listPrompts(),
+    }));
+
+    this.server.setRequestHandler(
+      { method: "prompts/get" },
+      async (request) => {
+        const { name, arguments: args } = request.params as {
+          name: string;
+          arguments?: Record<string, any>;
+        };
+
+        return await this.promptHandlers.getPrompt(name, args || {});
+      }
+    );
+
+    // Logging handler
+    this.server.setNotificationHandler(
+      { method: "notifications/message" },
+      async (notification) => {
+        const { level, logger, data } = notification.params as {
+          level: string;
+          logger?: string;
+          data: any;
+        };
+
+        this.logger.log(level as any, `[${logger}] ${JSON.stringify(data)}`);
+      }
+    );
+  }
+
+  async start(): Promise<void> {
+    const transport = new StdioServerTransport();
+    await this.server.connect(transport);
+    this.logger.info("MCP Server started successfully");
+  }
+
+  async stop(): Promise<void> {
+    await this.server.close();
+    this.logger.info("MCP Server stopped");
+  }
+}
+
+// Start the server
+if (require.main === module) {
+  const server = new AwesomeMCPServer();
+
+  process.on("SIGINT", async () => {
+    console.log("Received SIGINT, shutting down gracefully...");
+    await server.stop();
+    process.exit(0);
+  });
+
+  server.start().catch(console.error);
+}
+```
+
+### Tool Handlers Implementation
+
+```typescript
+// src/handlers/tools.ts
+import {
+  Tool,
+  ToolResult,
+  TextContent,
+} from "@modelcontextprotocol/sdk/types.js";
+import { DatabaseService } from "../services/database.js";
+import { FileSystemService } from "../services/filesystem.js";
+import { ExternalAPIService } from "../services/external-api.js";
+import { Logger } from "../utils/logging.js";
+import { PermissionManager } from "../utils/permissions.js";
+
+export class ToolHandlers {
+  private dbService: DatabaseService;
+  private fsService: FileSystemService;
+  private apiService: ExternalAPIService;
+
+  constructor(private logger: Logger, private permissions: PermissionManager) {
+    this.dbService = new DatabaseService();
+    this.fsService = new FileSystemService();
+    this.apiService = new ExternalAPIService();
+  }
+
+  async listTools(): Promise<Tool[]> {
+    return [
+      {
+        name: "query_database",
+        description: "Execute SQL queries against the database",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "SQL query to execute",
+            },
+            limit: {
+              type: "number",
+              description: "Maximum number of results",
+              default: 100,
+            },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "search_files",
+        description: "Search for files matching a pattern",
+        inputSchema: {
+          type: "object",
+          properties: {
+            pattern: {
+              type: "string",
+              description: "Glob pattern to search for",
+            },
+            directory: {
+              type: "string",
+              description: "Directory to search in",
+              default: ".",
+            },
+            recursive: {
+              type: "boolean",
+              description: "Search recursively",
+              default: true,
+            },
+          },
+          required: ["pattern"],
+        },
+      },
+      {
+        name: "http_request",
+        description: "Make HTTP requests to external APIs",
+        inputSchema: {
+          type: "object",
+          properties: {
+            url: {
+              type: "string",
+              description: "URL to request",
+            },
+            method: {
+              type: "string",
+              enum: ["GET", "POST", "PUT", "DELETE"],
+              default: "GET",
+            },
+            headers: {
+              type: "object",
+              description: "HTTP headers",
+            },
+            body: {
+              type: "string",
+              description: "Request body",
+            },
+          },
+          required: ["url"],
+        },
+      },
+      {
+        name: "analyze_code",
+        description: "Analyze code for issues and suggestions",
+        inputSchema: {
+          type: "object",
+          properties: {
+            code: {
+              type: "string",
+              description: "Source code to analyze",
+            },
+            language: {
+              type: "string",
+              description: "Programming language",
+            },
+            checks: {
+              type: "array",
+              items: {
+                type: "string",
+                enum: ["syntax", "security", "performance", "style"],
+              },
+              description: "Types of analysis to perform",
+            },
+          },
+          required: ["code"],
+        },
+      },
+    ];
+  }
+
+  async callTool(name: string, args: Record<string, any>): Promise<ToolResult> {
+    this.logger.info(`Calling tool: ${name}`, { args });
+
+    try {
+      switch (name) {
+        case "query_database":
+          return await this.handleDatabaseQuery(args);
+        case "search_files":
+          return await this.handleFileSearch(args);
+        case "http_request":
+          return await this.handleHttpRequest(args);
+        case "analyze_code":
+          return await this.handleCodeAnalysis(args);
+        default:
+          throw new Error(`Unknown tool: ${name}`);
+      }
+    } catch (error) {
+      this.logger.error(`Tool execution failed: ${name}`, { error, args });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error executing tool ${name}: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  private async handleDatabaseQuery(
+    args: Record<string, any>
+  ): Promise<ToolResult> {
+    const { query, limit = 100 } = args;
+
+    // Validate SQL query (basic security check)
+    if (!this.isValidQuery(query)) {
+      throw new Error("Invalid or potentially dangerous SQL query");
+    }
+
+    const results = await this.dbService.executeQuery(query, limit);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `Query executed successfully. Found ${results.length} results:\n\n` +
+            JSON.stringify(results, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async handleFileSearch(
+    args: Record<string, any>
+  ): Promise<ToolResult> {
+    const { pattern, directory = ".", recursive = true } = args;
+
+    const files = await this.fsService.searchFiles(
+      pattern,
+      directory,
+      recursive
+    );
+
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `Found ${files.length} files matching "${pattern}":\n\n` +
+            files.map((file) => `- ${file}`).join("\n"),
+        },
+      ],
+    };
+  }
+
+  private async handleHttpRequest(
+    args: Record<string, any>
+  ): Promise<ToolResult> {
+    const { url, method = "GET", headers = {}, body } = args;
+
+    // Validate URL
+    if (!this.isValidUrl(url)) {
+      throw new Error("Invalid URL provided");
+    }
+
+    const response = await this.apiService.makeRequest({
+      url,
+      method,
+      headers,
+      body,
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `HTTP ${method} ${url}\n` +
+            `Status: ${response.status}\n` +
+            `Headers: ${JSON.stringify(response.headers, null, 2)}\n\n` +
+            `Response:\n${response.data}`,
+        },
+      ],
+    };
+  }
+
+  private async handleCodeAnalysis(
+    args: Record<string, any>
+  ): Promise<ToolResult> {
+    const { code, language, checks = ["syntax", "security", "style"] } = args;
+
+    const analysis = await this.analyzeCode(code, language, checks);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `Code Analysis Results:\n\n` +
+            `Language: ${language}\n` +
+            `Checks performed: ${checks.join(", ")}\n\n` +
+            `Issues found: ${analysis.issues.length}\n\n` +
+            analysis.issues
+              .map(
+                (issue) =>
+                  `- ${issue.severity}: ${issue.message} (Line ${issue.line})`
+              )
+              .join("\n"),
+        },
+      ],
+    };
+  }
+
+  private isValidQuery(query: string): boolean {
+    // Basic SQL injection protection
+    const dangerous = [
+      /DROP\s+TABLE/i,
+      /DELETE\s+FROM/i,
+      /UPDATE\s+.*\s+SET/i,
+      /INSERT\s+INTO/i,
+      /CREATE\s+TABLE/i,
+      /ALTER\s+TABLE/i,
+      /TRUNCATE/i,
+      /EXEC/i,
+      /EXECUTE/i,
+    ];
+
+    return !dangerous.some((pattern) => pattern.test(query));
+  }
+
+  private isValidUrl(url: string): boolean {
+    try {
+      const parsed = new URL(url);
+      // Only allow HTTP and HTTPS
+      return ["http:", "https:"].includes(parsed.protocol);
+    } catch {
+      return false;
+    }
+  }
+
+  private async analyzeCode(
+    code: string,
+    language: string,
+    checks: string[]
+  ): Promise<{
+    issues: Array<{ severity: string; message: string; line: number }>;
+  }> {
+    // Simplified code analysis - in practice, integrate with real linters
+    const issues = [];
+
+    if (checks.includes("syntax")) {
+      // Basic syntax checks
+      if (language === "javascript" || language === "typescript") {
+        const lines = code.split("\n");
+        lines.forEach((line, index) => {
+          if (line.includes("eval(")) {
+            issues.push({
+              severity: "error",
+              message: "Use of eval() is dangerous",
+              line: index + 1,
+            });
+          }
+        });
+      }
+    }
+
+    if (checks.includes("security")) {
+      // Security checks
+      if (code.includes("innerHTML") && language === "javascript") {
+        issues.push({
+          severity: "warning",
+          message: "Potential XSS vulnerability with innerHTML",
+          line: 1,
+        });
+      }
+    }
+
+    return { issues };
+  }
+}
+```
+
+### Resource Handlers Implementation
+
+```typescript
+// src/handlers/resources.ts
+import { Resource, ResourceContents } from "@modelcontextprotocol/sdk/types.js";
+import { FileSystemService } from "../services/filesystem.js";
+import { DatabaseService } from "../services/database.js";
+import { Logger } from "../utils/logging.js";
+import { PermissionManager } from "../utils/permissions.js";
+
+export class ResourceHandlers {
+  private fsService: FileSystemService;
+  private dbService: DatabaseService;
+
+  constructor(private logger: Logger, private permissions: PermissionManager) {
+    this.fsService = new FileSystemService();
+    this.dbService = new DatabaseService();
+  }
+
+  async listResources(): Promise<Resource[]> {
+    const resources: Resource[] = [];
+
+    // Add file system resources
+    const files = await this.fsService.listAccessibleFiles();
+    resources.push(
+      ...files.map((file) => ({
+        uri: `file://${file.path}`,
+        name: file.name,
+        description: `File: ${file.path}`,
+        mimeType: file.mimeType,
+      }))
+    );
+
+    // Add database resources
+    const tables = await this.dbService.listTables();
+    resources.push(
+      ...tables.map((table) => ({
+        uri: `db://table/${table.name}`,
+        name: `Table: ${table.name}`,
+        description: `Database table with ${table.rowCount} rows`,
+        mimeType: "application/json",
+      }))
+    );
+
+    return resources;
+  }
+
+  async readResource(uri: string): Promise<ResourceContents[]> {
+    this.logger.info(`Reading resource: ${uri}`);
+
+    const url = new URL(uri);
+
+    switch (url.protocol) {
+      case "file:":
+        return await this.readFileResource(url.pathname);
+      case "db:":
+        return await this.readDatabaseResource(url.pathname);
+      default:
+        throw new Error(`Unsupported protocol: ${url.protocol}`);
+    }
+  }
+
+  private async readFileResource(path: string): Promise<ResourceContents[]> {
+    const content = await this.fsService.readFile(path);
+    const mimeType = this.fsService.getMimeType(path);
+
+    if (mimeType.startsWith("text/") || mimeType === "application/json") {
+      return [
+        {
+          uri: `file://${path}`,
+          mimeType,
+          text: content.toString(),
+        },
+      ];
+    } else {
+      return [
+        {
+          uri: `file://${path}`,
+          mimeType,
+          blob: content.toString("base64"),
+        },
+      ];
+    }
+  }
+
+  private async readDatabaseResource(
+    tablePath: string
+  ): Promise<ResourceContents[]> {
+    // Parse table name from path like "/table/users"
+    const tableName = tablePath.split("/")[2];
+    if (!tableName) {
+      throw new Error("Invalid database resource path");
+    }
+
+    const data = await this.dbService.getTableData(tableName);
+
+    return [
+      {
+        uri: `db://table/${tableName}`,
+        mimeType: "application/json",
+        text: JSON.stringify(
+          {
+            table: tableName,
+            rows: data.length,
+            data: data,
+          },
+          null,
+          2
+        ),
+      },
+    ];
+  }
+}
+```
+
+### Service Layer Implementation
+
+```typescript
+// src/services/database.ts
+import { Pool } from "pg";
+import { Logger } from "../utils/logging.js";
+
+export class DatabaseService {
+  private pool: Pool;
+  private logger: Logger;
+
+  constructor() {
+    this.logger = new Logger("DatabaseService");
+    this.pool = new Pool({
+      host: process.env.DB_HOST || "localhost",
+      port: parseInt(process.env.DB_PORT || "5432"),
+      database: process.env.DB_NAME || "myapp",
+      user: process.env.DB_USER || "user",
+      password: process.env.DB_PASSWORD || "password",
+      max: 10, // Maximum number of connections
+      idleTimeoutMillis: 30000,
+    });
+  }
+
+  async executeQuery(query: string, limit?: number): Promise<any[]> {
+    const client = await this.pool.connect();
+
+    try {
+      let finalQuery = query;
+      if (limit) {
+        finalQuery = `${query} LIMIT ${limit}`;
+      }
+
+      this.logger.info("Executing query", { query: finalQuery });
+      const result = await client.query(finalQuery);
+      return result.rows;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listTables(): Promise<Array<{ name: string; rowCount: number }>> {
+    const client = await this.pool.connect();
+
+    try {
+      const tablesQuery = `
+        SELECT 
+          table_name,
+          (SELECT COUNT(*) FROM information_schema.tables WHERE table_name = t.table_name) as row_count
+        FROM information_schema.tables t
+        WHERE table_schema = 'public'
+        ORDER BY table_name
+      `;
+
+      const result = await client.query(tablesQuery);
+      return result.rows.map((row) => ({
+        name: row.table_name,
+        rowCount: parseInt(row.row_count) || 0,
+      }));
+    } finally {
+      client.release();
+    }
+  }
+
+  async getTableData(tableName: string, limit: number = 100): Promise<any[]> {
+    // Validate table name to prevent SQL injection
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tableName)) {
+      throw new Error("Invalid table name");
+    }
+
+    return await this.executeQuery(`SELECT * FROM ${tableName}`, limit);
+  }
+
+  async close(): Promise<void> {
+    await this.pool.end();
+  }
+}
+
+// src/services/filesystem.ts
+import { promises as fs } from "fs";
+import { join, extname, basename } from "path";
+import { glob } from "glob";
+import { Logger } from "../utils/logging.js";
+
+export class FileSystemService {
+  private logger: Logger;
+  private allowedPaths: string[];
+
+  constructor() {
+    this.logger = new Logger("FileSystemService");
+    this.allowedPaths = process.env.ALLOWED_PATHS?.split(",") || ["."];
+  }
+
+  async searchFiles(
+    pattern: string,
+    directory: string,
+    recursive: boolean
+  ): Promise<string[]> {
+    // Validate directory is allowed
+    if (!this.isPathAllowed(directory)) {
+      throw new Error(`Access denied to directory: ${directory}`);
+    }
+
+    const globPattern = recursive
+      ? join(directory, "**", pattern)
+      : join(directory, pattern);
+
+    try {
+      const files = await glob(globPattern);
+      return files.filter((file) => this.isPathAllowed(file));
+    } catch (error) {
+      this.logger.error("File search failed", { pattern, directory, error });
+      throw error;
+    }
+  }
+
+  async readFile(path: string): Promise<Buffer> {
+    if (!this.isPathAllowed(path)) {
+      throw new Error(`Access denied to file: ${path}`);
+    }
+
+    try {
+      return await fs.readFile(path);
+    } catch (error) {
+      this.logger.error("File read failed", { path, error });
+      throw error;
+    }
+  }
+
+  async listAccessibleFiles(): Promise<
+    Array<{ path: string; name: string; mimeType: string }>
+  > {
+    const files = [];
+
+    for (const allowedPath of this.allowedPaths) {
+      try {
+        const globPattern = join(allowedPath, "**/*");
+        const paths = await glob(globPattern);
+
+        for (const path of paths) {
+          const stats = await fs.stat(path);
+          if (stats.isFile()) {
+            files.push({
+              path,
+              name: basename(path),
+              mimeType: this.getMimeType(path),
+            });
+          }
+        }
+      } catch (error) {
+        this.logger.warn("Failed to list files in path", {
+          path: allowedPath,
+          error,
+        });
+      }
+    }
+
+    return files;
+  }
+
+  getMimeType(filePath: string): string {
+    const ext = extname(filePath).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      ".txt": "text/plain",
+      ".md": "text/markdown",
+      ".json": "application/json",
+      ".js": "text/javascript",
+      ".ts": "text/typescript",
+      ".py": "text/x-python",
+      ".html": "text/html",
+      ".css": "text/css",
+      ".pdf": "application/pdf",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".gif": "image/gif",
+    };
+
+    return mimeTypes[ext] || "application/octet-stream";
+  }
+
+  private isPathAllowed(path: string): boolean {
+    // Normalize path and check against allowed paths
+    const normalizedPath = join(".", path);
+    return this.allowedPaths.some((allowedPath) =>
+      normalizedPath.startsWith(join(".", allowedPath))
+    );
+  }
+}
+```
+
+## Building MCP Clients
+
+### Basic MCP Client
+
+```typescript
+// src/client/index.ts
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Logger } from "../utils/logging.js";
+
+export class MCPClient {
+  private client: Client;
+  private transport: StdioClientTransport;
+  private logger: Logger;
+
+  constructor(serverCommand: string, serverArgs: string[] = []) {
+    this.logger = new Logger("MCPClient");
+
+    this.transport = new StdioClientTransport({
+      command: serverCommand,
+      args: serverArgs,
+    });
+
+    this.client = new Client(
+      {
+        name: "awesome-mcp-client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {
+          sampling: {},
+        },
+      }
+    );
+  }
+
+  async connect(): Promise<void> {
+    try {
+      await this.client.connect(this.transport);
+      this.logger.info("Connected to MCP server");
+    } catch (error) {
+      this.logger.error("Failed to connect to MCP server", { error });
+      throw error;
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    try {
+      await this.client.close();
+      this.logger.info("Disconnected from MCP server");
+    } catch (error) {
+      this.logger.error("Failed to disconnect from MCP server", { error });
+      throw error;
+    }
+  }
+
+  async listTools(): Promise<any[]> {
+    try {
+      const response = await this.client.request(
+        { method: "tools/list" },
+        { tools: [] }
+      );
+      return response.tools;
+    } catch (error) {
+      this.logger.error("Failed to list tools", { error });
+      throw error;
+    }
+  }
+
+  async callTool(name: string, args?: Record<string, any>): Promise<any> {
+    try {
+      const response = await this.client.request(
+        {
+          method: "tools/call",
+          params: { name, arguments: args },
+        },
+        { content: [] }
+      );
+      return response;
+    } catch (error) {
+      this.logger.error("Failed to call tool", { name, args, error });
+      throw error;
+    }
+  }
+
+  async listResources(): Promise<any[]> {
+    try {
+      const response = await this.client.request(
+        { method: "resources/list" },
+        { resources: [] }
+      );
+      return response.resources;
+    } catch (error) {
+      this.logger.error("Failed to list resources", { error });
+      throw error;
+    }
+  }
+
+  async readResource(uri: string): Promise<any> {
+    try {
+      const response = await this.client.request(
+        {
+          method: "resources/read",
+          params: { uri },
+        },
+        { contents: [] }
+      );
+      return response.contents;
+    } catch (error) {
+      this.logger.error("Failed to read resource", { uri, error });
+      throw error;
+    }
+  }
+
+  async listPrompts(): Promise<any[]> {
+    try {
+      const response = await this.client.request(
+        { method: "prompts/list" },
+        { prompts: [] }
+      );
+      return response.prompts;
+    } catch (error) {
+      this.logger.error("Failed to list prompts", { error });
+      throw error;
+    }
+  }
+
+  async getPrompt(name: string, args?: Record<string, any>): Promise<any> {
+    try {
+      const response = await this.client.request(
+        {
+          method: "prompts/get",
+          params: { name, arguments: args },
+        },
+        { messages: [] }
+      );
+      return response;
+    } catch (error) {
+      this.logger.error("Failed to get prompt", { name, args, error });
+      throw error;
+    }
+  }
+}
+
+// Example usage
+async function example() {
+  const client = new MCPClient("node", ["dist/server/index.js"]);
+
+  try {
+    await client.connect();
+
+    // List available tools
+    const tools = await client.listTools();
+    console.log(
+      "Available tools:",
+      tools.map((t) => t.name)
+    );
+
+    // Execute a tool
+    const result = await client.callTool("search_files", {
+      pattern: "*.ts",
+      directory: "./src",
+    });
+    console.log("Search results:", result.content[0].text);
+
+    // List and read resources
+    const resources = await client.listResources();
+    console.log("Available resources:", resources.length);
+
+    if (resources.length > 0) {
+      const content = await client.readResource(resources[0].uri);
+      console.log("Resource content:", content[0].text?.substring(0, 200));
+    }
+  } finally {
+    await client.disconnect();
+  }
+}
+```
+
+### Advanced Client with Connection Management
+
+```typescript
+// src/client/connection-manager.ts
+export class MCPConnectionManager {
+  private connections: Map<string, MCPClient> = new Map();
+  private logger: Logger;
+
+  constructor() {
+    this.logger = new Logger("MCPConnectionManager");
+  }
+
+  async createConnection(
+    name: string,
+    config: {
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+      timeout?: number;
+    }
+  ): Promise<MCPClient> {
+    if (this.connections.has(name)) {
+      throw new Error(`Connection ${name} already exists`);
+    }
+
+    const client = new MCPClient(config.command, config.args);
+
+    // Set timeout for connection
+    const connectPromise = client.connect();
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(
+        () => reject(new Error("Connection timeout")),
+        config.timeout || 30000
+      );
+    });
+
+    await Promise.race([connectPromise, timeoutPromise]);
+
+    this.connections.set(name, client);
+    this.logger.info(`Created connection: ${name}`);
+
+    return client;
+  }
+
+  getConnection(name: string): MCPClient {
+    const connection = this.connections.get(name);
+    if (!connection) {
+      throw new Error(`Connection ${name} not found`);
+    }
+    return connection;
+  }
+
+  async closeConnection(name: string): Promise<void> {
+    const connection = this.connections.get(name);
+    if (connection) {
+      await connection.disconnect();
+      this.connections.delete(name);
+      this.logger.info(`Closed connection: ${name}`);
+    }
+  }
+
+  async closeAllConnections(): Promise<void> {
+    await Promise.all(
+      Array.from(this.connections.entries()).map(async ([name, client]) => {
+        try {
+          await client.disconnect();
+          this.logger.info(`Closed connection: ${name}`);
+        } catch (error) {
+          this.logger.error(`Failed to close connection: ${name}`, { error });
+        }
+      })
+    );
+    this.connections.clear();
+  }
+
+  listConnections(): string[] {
+    return Array.from(this.connections.keys());
+  }
+}
+```
+
+## Configuration and Deployment
+
+### Server Configuration
+
+```json
+// config/server.json
+{
+  "server": {
+    "name": "awesome-mcp-server",
+    "version": "1.0.0",
+    "description": "Comprehensive MCP server with database, filesystem, and API capabilities"
+  },
+  "capabilities": {
+    "tools": {
+      "listChanged": true
+    },
+    "resources": {
+      "subscribe": true,
+      "listChanged": true
+    },
+    "prompts": {
+      "listChanged": true
+    },
+    "logging": {}
+  },
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "database": "myapp",
+    "user": "user",
+    "password": "password",
+    "maxConnections": 10
+  },
+  "filesystem": {
+    "allowedPaths": ["./data", "./docs", "./src"],
+    "maxFileSize": "10MB"
+  },
+  "api": {
+    "timeout": 30000,
+    "maxRetries": 3,
+    "allowedDomains": ["api.example.com", "httpbin.org"]
+  },
+  "security": {
+    "enablePermissions": true,
+    "logLevel": "info"
+  }
+}
+```
+
+### Permission Configuration
+
+```json
+// config/permissions.json
+{
+  "tools": {
+    "allowed": ["*"],
+    "denied": ["system_admin", "delete_files"],
+    "limits": {
+      "query_database": {
+        "maxExecutionTime": 30000,
+        "maxRows": 1000
+      },
+      "http_request": {
+        "maxResponseSize": "1MB",
+        "allowedMethods": ["GET", "POST"],
+        "blockedDomains": ["internal.company.com"]
+      }
+    }
+  },
+  "resources": {
+    "allowed": ["file://./data/**", "file://./docs/**", "db://table/*"],
+    "denied": ["file://./config/**", "file://.env*", "db://table/admin_*"],
+    "limits": {
+      "maxResourceSize": "5MB"
+    }
+  }
+}
+```
+
+### Docker Deployment
+
+```dockerfile
+# Dockerfile
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Install dependencies
+COPY package*.json ./
+RUN npm ci --only=production
+
+# Copy source code
+COPY dist/ ./dist/
+COPY config/ ./config/
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S mcp -u 1001
+USER mcp
+
+# Expose health check endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD node -e "console.log('Health check passed')" || exit 1
+
+CMD ["node", "dist/server/index.js"]
+```
+
+```yaml
+# docker-compose.yml
+version: "3.8"
+
+services:
+  mcp-server:
+    build: .
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=mcpdb
+      - DB_USER=mcp
+      - DB_PASSWORD=secretpassword
+    volumes:
+      - ./data:/app/data:ro
+      - ./logs:/app/logs
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=mcpdb
+      - POSTGRES_USER=mcp
+      - POSTGRES_PASSWORD=secretpassword
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+```
+
+## Testing and Validation
+
+### Unit Testing
+
+```typescript
+// tests/handlers/tools.test.ts
+import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
+import { ToolHandlers } from "../../src/handlers/tools.js";
+import { Logger } from "../../src/utils/logging.js";
+import { PermissionManager } from "../../src/utils/permissions.js";
+
+describe("ToolHandlers", () => {
+  let toolHandlers: ToolHandlers;
+  let mockLogger: Logger;
+  let mockPermissions: PermissionManager;
+
+  beforeEach(() => {
+    mockLogger = new Logger("test");
+    mockPermissions = new PermissionManager();
+    toolHandlers = new ToolHandlers(mockLogger, mockPermissions);
+  });
+
+  describe("listTools", () => {
+    it("should return available tools", async () => {
+      const tools = await toolHandlers.listTools();
+
+      expect(tools).toHaveLength(4);
+      expect(tools.map((t) => t.name)).toContain("query_database");
+      expect(tools.map((t) => t.name)).toContain("search_files");
+      expect(tools.map((t) => t.name)).toContain("http_request");
+      expect(tools.map((t) => t.name)).toContain("analyze_code");
+    });
+  });
+
+  describe("callTool", () => {
+    it("should execute search_files tool successfully", async () => {
+      const result = await toolHandlers.callTool("search_files", {
+        pattern: "*.test.ts",
+        directory: "./tests",
+      });
+
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].type).toBe("text");
+      expect(result.content[0].text).toContain("Found");
+    });
+
+    it("should handle unknown tools", async () => {
+      const result = await toolHandlers.callTool("unknown_tool", {});
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Unknown tool");
+    });
+  });
+});
+```
+
+### Integration Testing
+
+```typescript
+// tests/integration/server.test.ts
+import { describe, it, expect, beforeAll, afterAll } from "@jest/globals";
+import { AwesomeMCPServer } from "../../src/server/index.js";
+import { MCPClient } from "../../src/client/index.js";
+
+describe("MCP Server Integration", () => {
+  let server: AwesomeMCPServer;
+  let client: MCPClient;
+
+  beforeAll(async () => {
+    // Start server in test mode
+    server = new AwesomeMCPServer();
+    await server.start();
+
+    // Connect client
+    client = new MCPClient("node", ["dist/server/index.js"]);
+    await client.connect();
+  });
+
+  afterAll(async () => {
+    await client.disconnect();
+    await server.stop();
+  });
+
+  it("should list tools via client", async () => {
+    const tools = await client.listTools();
+    expect(tools.length).toBeGreaterThan(0);
+  });
+
+  it("should execute tools via client", async () => {
+    const result = await client.callTool("search_files", {
+      pattern: "*.ts",
+      directory: "./src",
+    });
+
+    expect(result.content).toBeDefined();
+    expect(result.content[0].type).toBe("text");
+  });
+
+  it("should list and read resources", async () => {
+    const resources = await client.listResources();
+    expect(Array.isArray(resources)).toBe(true);
+
+    if (resources.length > 0) {
+      const content = await client.readResource(resources[0].uri);
+      expect(content).toBeDefined();
+      expect(Array.isArray(content)).toBe(true);
+    }
+  });
+});
+```
+
+## Production Considerations
+
+### Monitoring and Observability
+
+```typescript
+// src/utils/monitoring.ts
+import { createPrometheusMetrics } from "prometheus-client";
+
+export class MCPMonitoring {
+  private metrics = {
+    toolCalls: createPrometheusMetrics.counter({
+      name: "mcp_tool_calls_total",
+      help: "Total number of tool calls",
+      labelNames: ["tool_name", "status"],
+    }),
+
+    resourceReads: createPrometheusMetrics.counter({
+      name: "mcp_resource_reads_total",
+      help: "Total number of resource reads",
+      labelNames: ["protocol", "status"],
+    }),
+
+    requestDuration: createPrometheusMetrics.histogram({
+      name: "mcp_request_duration_seconds",
+      help: "Request duration in seconds",
+      labelNames: ["method"],
+    }),
+
+    activeConnections: createPrometheusMetrics.gauge({
+      name: "mcp_active_connections",
+      help: "Number of active connections",
+    }),
+  };
+
+  recordToolCall(toolName: string, status: "success" | "error"): void {
+    this.metrics.toolCalls.inc({ tool_name: toolName, status });
+  }
+
+  recordResourceRead(protocol: string, status: "success" | "error"): void {
+    this.metrics.resourceReads.inc({ protocol, status });
+  }
+
+  recordRequestDuration(method: string, duration: number): void {
+    this.metrics.requestDuration.observe({ method }, duration);
+  }
+
+  updateActiveConnections(count: number): void {
+    this.metrics.activeConnections.set(count);
+  }
+}
+```
+
+### Health Checks
+
+```typescript
+// src/utils/health.ts
+export class HealthChecker {
+  private checks: Map<string, () => Promise<boolean>> = new Map();
+
+  addCheck(name: string, check: () => Promise<boolean>): void {
+    this.checks.set(name, check);
+  }
+
+  async runHealthCheck(): Promise<{
+    status: "healthy" | "unhealthy";
+    checks: Record<string, boolean>;
+  }> {
+    const results: Record<string, boolean> = {};
+    let allHealthy = true;
+
+    for (const [name, check] of this.checks) {
+      try {
+        results[name] = await check();
+        if (!results[name]) allHealthy = false;
+      } catch (error) {
+        results[name] = false;
+        allHealthy = false;
+      }
+    }
+
+    return {
+      status: allHealthy ? "healthy" : "unhealthy",
+      checks: results,
+    };
+  }
+}
+
+// Usage in server
+const healthChecker = new HealthChecker();
+
+healthChecker.addCheck("database", async () => {
+  try {
+    await dbService.executeQuery("SELECT 1");
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+healthChecker.addCheck("filesystem", async () => {
+  try {
+    await fs.access("./data");
+    return true;
+  } catch {
+    return false;
+  }
+});
+```
+
+## Key Takeaways
+
+- **Modular architecture** enables maintainable and extensible MCP servers
+- **Type safety** with TypeScript prevents runtime errors and improves developer experience
+- **Security considerations** are crucial for production deployments
+- **Comprehensive testing** ensures reliability and correctness
+- **Monitoring and observability** are essential for production operations
+- **Configuration management** allows for flexible deployment scenarios
+- **Error handling** provides graceful degradation and debugging information
+
+This implementation guide provides a solid foundation for building production-ready MCP servers and clients that can scale and integrate seamlessly with AI applications.
+
+## Next Steps
+
+Chapter 4 will explore **Agent Integration**, showing how to integrate MCP servers with various AI agents and frameworks for building sophisticated multi-tool workflows.
+
+---
+
+## Navigation
+
+- [← Chapter 2: Protocol Design](./protocol)
+- [Chapter 4: Agent Integration →](./agents)

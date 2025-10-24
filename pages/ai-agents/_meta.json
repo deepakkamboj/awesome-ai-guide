@@ -1,27 +1,9 @@
 {
   "index": "Introduction to AI Agents",
-  "foundations": {
-    "title": "Chapter 1: Foundations",
-    "type": "page"
-  },
-  "evolution": {
-    "title": "Chapter 2: Evolution of Software",
-    "type": "page"
-  },
-  "ai-agents": {
-    "title": "Chapter 3: What is an AI Agent?",
-    "type": "page"
-  },
-  "types-patterns": {
-    "title": "Chapter 4: Agent Types & Patterns",
-    "type": "page"
-  },
-  "human-ai": {
-    "title": "Chapter 5: Human-AI Collaboration",
-    "type": "page"
-  },
-  "frameworks": {
-    "title": "Chapter 6: AI Frameworks Evolution",
-    "type": "page"
-  }
+  "foundations": "Chapter 1: Foundations",
+  "evolution": "Chapter 2: Evolution of Software",
+  "ai-agents": "Chapter 3: What is an AI Agent?",
+  "types-patterns": "Chapter 4: Agent Types & Patterns",
+  "human-ai": "Chapter 5: Human-AI Collaboration",
+  "frameworks": "Chapter 6: AI Frameworks Evolution"
 }
